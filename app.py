@@ -30,7 +30,8 @@ if prompt := st.chat_input("Ask a question about Indian law..."):
     # Generate and stream the response
     with st.chat_message("assistant"):
         stream = client.chat.completions.create(
-            model="gpt-4o",
+            # model="gpt-4o",
+            model="gpt-5.6-sol",
             messages=st.session_state.messages,
             stream=True,
         )
