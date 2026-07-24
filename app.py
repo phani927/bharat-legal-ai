@@ -3,7 +3,7 @@ from openai import OpenAI
 
 st.set_page_config(page_title="Indian Legal AI", page_icon="⚖️")
 st.title("⚖️ Indian Legal AI Assistant")
-st.write("A prototype AI engine tuned for Indian Jurisprudence.")
+st.write("A prototype AI engine tuned for Indian Jurisprudence by Phani.")
 
 # 1. Pull the API key securely from Streamlit's backend secrets
 api_key = st.secrets["OPENAI_API_KEY"]
