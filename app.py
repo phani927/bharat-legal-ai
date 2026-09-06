@@ -2,7 +2,7 @@ import streamlit as st
 from openai import OpenAI
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Indian Legal AI", page_icon="⚖️")
+st.set_page_config(page_title="Indian Legal AI by Phani", page_icon="⚖️")
 
 # 1. Initialize Clients
 @st.cache_resource
