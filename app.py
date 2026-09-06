@@ -1,40 +1,97 @@
 import streamlit as st
 from openai import OpenAI
+from supabase import create_client, Client
 
 st.set_page_config(page_title="Indian Legal AI", page_icon="⚖️")
-st.title("⚖️ Indian Legal AI Assistant")
-st.write("A prototype AI engine tuned for Indian Jurisprudence by Phani.")
 
-# 1. Pull the API key securely from Streamlit's backend secrets
-api_key = st.secrets["OPENAI_API_KEY"]
-client = OpenAI(api_key=api_key)
+# 1. Initialize Clients
+@st.cache_resource
+def init_supabase() -> Client:
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-# 2. Set up the chat memory and persona
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "system", "content": "You are a highly capable Indian Legal Assistant. Answer questions based on the Constitution of India, the Bharatiya Nyaya Sanhita, civil procedure codes, and Supreme Court precedent. Be precise, formal, and cite specific sections where possible."}
-    ]
+supabase = init_supabase()
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# 3. Display the chat history
-for message in st.session_state.messages:
-    if message["role"] != "system":
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-# 4. Accept user input
-if prompt := st.chat_input("Ask a question about Indian law..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # Generate and stream the response
-    with st.chat_message("assistant"):
-        stream = client.chat.completions.create(
-            # model="gpt-4o",
-            model="gpt-5.6-sol",
-            messages=st.session_state.messages,
-            stream=True,
-        )
-        response = st.write_stream(stream)
+# 2. Authentication Gate (Login / Sign Up)
+if st.session_state.user is None:
+    st.title("⚖️ Indian Legal AI Assistant")
+    st.write("Please sign in or create an account to access the legal engine.")
     
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
+    
+    with tab_login:
+        with st.form("login_form"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            if st.form_submit_button("Log In"):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    st.session_state.user = res.user
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Login failed: {e}")
+
+    with tab_signup:
+        with st.form("signup_form"):
+            new_email = st.text_input("Email", key="signup_email")
+            new_password = st.text_input("Password", type="password", key="signup_pwd")
+            if st.form_submit_button("Create Account"):
+                try:
+                    supabase.auth.sign_up({"email": new_email, "password": new_password})
+                    st.success("Account created successfully. You can now log in.")
+                except Exception as e:
+                    st.error(f"Sign up failed: {e}")
+
+# 3. Authenticated Interface
+else:
+    # Sidebar Session Management
+    st.sidebar.write(f"Logged in as: **{st.session_state.user.email}**")
+    if st.sidebar.button("Log Out"):
+        supabase.auth.sign_out()
+        st.session_state.user = None
+        st.session_state.messages = []
+        st.rerun()
+
+    st.title("⚖️ Indian Legal AI Assistant")
+    st.write("A prototype AI engine tuned for Indian Jurisprudence by Phani.")
+
+    # 4. Load Persistent Chat History
+    if "messages" not in st.session_state:
+        response = supabase.table("user_chat_history").select("chat_data").eq("user_id", st.session_state.user.id).execute()
+        if response.data:
+            st.session_state.messages = response.data[0]["chat_data"]
+        else:
+            st.session_state.messages = [
+                {"role": "system", "content": "You are a highly capable Indian Legal Assistant. Answer questions based on the Constitution of India, the Bharatiya Nyaya Sanhita, civil procedure codes, and Supreme Court precedent. Be precise, formal, and cite specific sections where possible."}
+            ]
+
+    # 5. Render History
+    for message in st.session_state.messages:
+        if message["role"] != "system":
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+    # 6. Chat Input & Streaming
+    if prompt := st.chat_input("Ask a question about Indian law..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            stream = client.chat.completions.create(
+                model="gpt-5.6-sol",
+                messages=st.session_state.messages,
+                stream=True,
+            )
+            response = st.write_stream(stream)
+        
+        st.session_state.messages.append({"role": "assistant", "content": response})
+
+        # Persist updated conversation to Supabase
+        supabase.table("user_chat_history").upsert({
+            "user_id": st.session_state.user.id,
+            "chat_data": st.session_state.messages
+        }).execute()
