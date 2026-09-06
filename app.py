@@ -41,10 +41,20 @@ if st.session_state.user is None:
             password = st.text_input("Password", type="password")
             if st.form_submit_button("Log In"):
                 try:
+                    # Authenticate user credentials
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                    st.session_state.user = res.user
-                    st.session_state.session = res.session
-                    st.rerun()
+                    
+                    # Check if the user has been approved by an admin in the profiles table
+                    profile_res = supabase.table("profiles").select("is_approved").eq("id", res.user.id).execute()
+                    
+                    if profile_res.data and profile_res.data[0]["is_approved"] == True:
+                        st.session_state.user = res.user
+                        st.session_state.session = res.session
+                        st.rerun()
+                    else:
+                        # Revoke session immediately if not approved
+                        supabase.auth.sign_out()
+                        st.warning("Your account is pending admin approval. Please check back later.")
                 except Exception as e:
                     st.error(f"Login failed: {e}")
 
@@ -55,7 +65,7 @@ if st.session_state.user is None:
             if st.form_submit_button("Create Account"):
                 try:
                     supabase.auth.sign_up({"email": new_email, "password": new_password})
-                    st.success("Account created successfully. You can now log in.")
+                    st.success("Account created successfully! It is currently pending administrator approval.")
                 except Exception as e:
                     st.error(f"Sign up failed: {e}")
 
