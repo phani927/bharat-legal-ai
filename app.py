@@ -14,6 +14,19 @@ client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 if "user" not in st.session_state:
     st.session_state.user = None
+if "session" not in st.session_state:
+    st.session_state.session = None
+
+# Restore Supabase auth session across reruns
+if st.session_state.session:
+    try:
+        supabase.auth.set_session(
+            st.session_state.session.access_token, 
+            st.session_state.session.refresh_token
+        )
+    except Exception:
+        st.session_state.user = None
+        st.session_state.session = None
 
 # 2. Authentication Gate (Login / Sign Up)
 if st.session_state.user is None:
@@ -30,6 +43,7 @@ if st.session_state.user is None:
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state.user = res.user
+                    st.session_state.session = res.session
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
@@ -52,6 +66,7 @@ else:
     if st.sidebar.button("Log Out"):
         supabase.auth.sign_out()
         st.session_state.user = None
+        st.session_state.session = None
         st.session_state.messages = []
         st.rerun()
 
