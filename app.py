@@ -2,7 +2,7 @@ import streamlit as st
 from openai import OpenAI
 from supabase import create_client, Client
 
-st.set_page_config(page_title="Indian Legal AI by Phani", page_icon="⚖️")
+st.set_page_config(page_title="Indian Legal AI", page_icon="⚖️")
 
 # 1. Initialize Clients
 @st.cache_resource
@@ -30,7 +30,7 @@ if st.session_state.session:
 
 # 2. Authentication Gate (Login / Sign Up)
 if st.session_state.user is None:
-    st.title("⚖️ Indian Legal AI Assistant")
+    st.title("⚖️ Indian Legal AI Assistant by Phani")
     st.write("Please sign in or create an account to access the legal engine.")
     
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
