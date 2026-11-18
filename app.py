@@ -108,6 +108,7 @@ else:
         with st.chat_message("assistant"):
             stream = client.chat.completions.create(
                 model="gpt-6.2-astra",
+                reasoning_effort="high",
                 messages=st.session_state.messages,
                 stream=True,
             )
