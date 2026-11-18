@@ -112,7 +112,19 @@ else:
                 messages=st.session_state.messages,
                 stream=True,
             )
+
+            resolved_model = None
+            def stream_text(chunks):
+                nonlocal resolved_model
+                for chunk in chunks:
+                    if chunk.model:
+                        resolved_model = chunk.model
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+                        
             response = st.write_stream(stream)
+            if resolved_model:
+                st.caption(f"Model: `{resolved_model}`")
         
         st.session_state.messages.append({"role": "assistant", "content": response})
 
