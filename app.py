@@ -113,18 +113,12 @@ else:
                 stream=True,
             )
 
-            resolved_model = [None]
-            def stream_text(chunks):
-                for chunk in chunks:
-                    if chunk.model:
-                        resolved_model[0] = chunk.model
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
-                        
             response = st.write_stream(stream)
-            if resolved_model:
-                st.caption(f"Model: `{resolved_model[0]}`")
-        
+
+            # Read the exact resolved model snapshot from OpenAI's HTTP response header
+            confirmed_model = stream.response.headers.get("openai-model", "gpt-6.2-astra")
+            st.caption(f"Model: `{confirmed_model}`")
+            
         st.session_state.messages.append({"role": "assistant", "content": response})
 
         # Persist updated conversation to Supabase
