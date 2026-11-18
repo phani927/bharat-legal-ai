@@ -93,20 +93,19 @@ else:
         st.session_state.user = None
         st.session_state.session = None
         st.session_state.messages = []
-        st.session_state.pop("active_doc_name", None)
-        st.session_state.pop("active_doc_text", None)
+        st.session_state.pop("active_docs", None)
         st.rerun()
 
     st.title("⚖️ Indian Legal AI Assistant")
     st.write("A prototype AI engine tuned for Indian Jurisprudence by Phani.")
 
-    # Show active uploaded document banner if one is loaded in memory
-    if st.session_state.get("active_doc_name"):
+    # Show active uploaded documents banner if files are loaded in memory
+    if st.session_state.get("active_docs"):
+        names = ", ".join(st.session_state.active_docs.keys())
         col1, col2 = st.columns([4, 1])
-        col1.info(f"📄 Active Judgment in Context: **{st.session_state.active_doc_name}**")
-        if col2.button("Clear File"):
-            st.session_state.pop("active_doc_name", None)
-            st.session_state.pop("active_doc_text", None)
+        col1.info(f"📄 Active Case Files ({len(st.session_state.active_docs)}): **{names}**")
+        if col2.button("Clear Files"):
+            st.session_state.pop("active_docs", None)
             st.rerun()
 
     # 4. Load Persistent Chat History
@@ -125,10 +124,10 @@ else:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-    # 6. Chat Input with Built-In '+' File Attachment
+    # 6. Chat Input with Multi-File '+' Attachment
     submission = st.chat_input(
-        "Ask about Indian law or click + to attach a judgment...",
-        accept_file=True,
+        "Ask about Indian law or click + to attach judgments/depositions...",
+        accept_file="multiple",
         file_type=["pdf", "docx", "txt"]
     )
 
@@ -136,30 +135,37 @@ else:
         user_text = submission.text or ""
         uploaded_files = submission.files or []
 
-        # If a new file was attached via '+', extract and store it in session_state
+        # Process all attached files and store them in session_state
         if uploaded_files:
-            f = uploaded_files[0]
-            extracted = extract_document_text(f)
-            if extracted.strip():
-                st.session_state.active_doc_name = f.name
-                st.session_state.active_doc_text = extracted
-                badge = f"📎 **Attached:** `{f.name}` (~{len(extracted)//4:,} tokens)\n\n"
-                user_text = badge + (user_text or "Please review and summarize this judgment.")
-            else:
-                st.error(f"Could not extract text from `{f.name}`. If it is a scanned PDF, please OCR it first.")
-                st.stop()
+            if "active_docs" not in st.session_state:
+                st.session_state.active_docs = {}
+
+            badges = []
+            for f in uploaded_files:
+                extracted = extract_document_text(f)
+                if extracted.strip():
+                    st.session_state.active_docs[f.name] = extracted
+                    badges.append(f"`{f.name}` (~{len(extracted)//4:,} tokens)")
+                else:
+                    st.error(f"No selectable text in `{f.name}`. If scanned, run OCR first.")
+                    st.stop()
+
+            badge_line = "📎 **Attached:** " + ", ".join(badges) + "\n\n"
+            user_text = badge_line + (user_text or "Please review and analyze these case documents.")
 
         if user_text.strip():
             st.session_state.messages.append({"role": "user", "content": user_text})
             with st.chat_message("user"):
                 st.markdown(user_text)
 
-            # Inject active judgment text into API call without bloating Supabase chat history
+            # Inject all active documents into API context without bloating Supabase chat history
             api_messages = list(st.session_state.messages)
-            if st.session_state.get("active_doc_text"):
-                doc_name = st.session_state.active_doc_name
-                doc_body = st.session_state.active_doc_text
-                doc_prompt = f"Attached document ({doc_name}). Cite [PAGE X] numbers:\n\n{doc_body}"
+            if st.session_state.get("active_docs"):
+                combined_sections = []
+                for fname, ftext in st.session_state.active_docs.items():
+                    combined_sections.append(f"=== DOCUMENT: {fname} ===\n{ftext}")
+                all_docs_text = "\n\n".join(combined_sections)
+                doc_prompt = f"Attached case documents. Cite document names and [PAGE X] numbers:\n\n{all_docs_text}"
                 api_messages.insert(1, {"role": "system", "content": doc_prompt})
 
             with st.chat_message("assistant"):
