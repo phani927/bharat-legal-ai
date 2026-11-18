@@ -23,7 +23,7 @@ if "session" not in st.session_state:
 if st.session_state.session:
     try:
         supabase.auth.set_session(
-            st.session_state.session.access_token, 
+            st.session_state.session.access_token,
             st.session_state.session.refresh_token
         )
     except Exception:
@@ -51,27 +51,23 @@ def extract_document_text(uploaded_file) -> str:
 if st.session_state.user is None:
     st.title("⚖️ Indian Legal AI Assistant by Phani")
     st.write("Please sign in or create an account to access the legal engine.")
-    
+
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
-    
+
     with tab_login:
         with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
             if st.form_submit_button("Log In"):
                 try:
-                    # Authenticate user credentials
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                    
-                    # Check if the user has been approved by an admin in the profiles table
                     profile_res = supabase.table("profiles").select("is_approved").eq("id", res.user.id).execute()
-                    
+
                     if profile_res.data and profile_res.data[0]["is_approved"] == True:
                         st.session_state.user = res.user
                         st.session_state.session = res.session
                         st.rerun()
                     else:
-                        # Revoke session immediately if not approved
                         supabase.auth.sign_out()
                         st.warning("Your account is pending admin approval. Please check back later.")
                 except Exception as e:
@@ -144,7 +140,27 @@ else:
         # Attach uploaded document text to the API context without bloating saved chat history
         api_messages = list(st.session_state.messages)
         if doc_text.strip():
-            api_messages.insert(1, {
-                "role": "system",
-                "content": (
-                    f"The user has attached the
+            doc_prompt = f"Attached document ({uploaded_file.name}). Cite [PAGE X] numbers:\n\n{doc_text}"
+            api_messages.insert(1, {"role": "system", "content": doc_prompt})
+
+        with st.chat_message("assistant"):
+            stream = client.chat.completions.create(
+                model="gpt-6.2-astra",
+                reasoning_effort="high",
+                messages=api_messages,
+                stream=True,
+            )
+
+            response = st.write_stream(stream)
+
+            # Read the exact resolved model snapshot from OpenAI's HTTP response header
+            confirmed_model = stream.response.headers.get("openai-model", "gpt-6.2-astra")
+            st.caption(f"Model: `{confirmed_model}`")
+
+        st.session_state.messages.append({"role": "assistant", "content": response})
+
+        # Persist updated conversation to Supabase
+        supabase.table("user_chat_history").upsert({
+            "user_id": st.session_state.user.id,
+            "chat_data": st.session_state.messages
+        }).execute()
