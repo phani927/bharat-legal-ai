@@ -1,6 +1,8 @@
 import streamlit as st
 from openai import OpenAI
 from supabase import create_client, Client
+from pypdf import PdfReader
+from docx import Document
 
 st.set_page_config(page_title="Indian Legal AI", page_icon="⚖️")
 
@@ -27,6 +29,23 @@ if st.session_state.session:
     except Exception:
         st.session_state.user = None
         st.session_state.session = None
+
+# Helper: Extract text from PDF, DOCX, or TXT with page numbers
+def extract_document_text(uploaded_file) -> str:
+    name = uploaded_file.name.lower()
+    if name.endswith(".pdf"):
+        reader = PdfReader(uploaded_file)
+        pages = []
+        for idx, page in enumerate(reader.pages, start=1):
+            text = page.extract_text() or ""
+            if text.strip():
+                pages.append(f"--- [PAGE {idx}] ---\n{text}")
+        return "\n\n".join(pages)
+    elif name.endswith(".docx"):
+        doc = Document(uploaded_file)
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    else:
+        return uploaded_file.read().decode("utf-8", errors="ignore")
 
 # 2. Authentication Gate (Login / Sign Up)
 if st.session_state.user is None:
@@ -80,6 +99,23 @@ else:
         st.session_state.messages = []
         st.rerun()
 
+    # Sidebar Document Uploader (Judgments, FIRs, Depositions)
+    st.sidebar.divider()
+    st.sidebar.subheader("📄 Case Document Upload")
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload Judgment / Pleading",
+        type=["pdf", "docx", "txt"],
+        help="Upload a searchable PDF, Word (.docx), or text file to analyze in chat."
+    )
+
+    doc_text = ""
+    if uploaded_file is not None:
+        doc_text = extract_document_text(uploaded_file)
+        if doc_text.strip():
+            st.sidebar.success(f"Loaded `{uploaded_file.name}` (~{len(doc_text)//4:,} tokens)")
+        else:
+            st.sidebar.error("No selectable text found. If this is a scanned PDF, run OCR first.")
+
     st.title("⚖️ Indian Legal AI Assistant")
     st.write("A prototype AI engine tuned for Indian Jurisprudence by Phani.")
 
@@ -100,29 +136,15 @@ else:
                 st.markdown(message["content"])
 
     # 6. Chat Input & Streaming
-    if prompt := st.chat_input("Ask a question about Indian law..."):
+    if prompt := st.chat_input("Ask a question about Indian law or your uploaded judgment..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        with st.chat_message("assistant"):
-            stream = client.chat.completions.create(
-                model="gpt-6.2-astra",
-                reasoning_effort="high",
-                messages=st.session_state.messages,
-                stream=True,
-            )
-
-            response = st.write_stream(stream)
-
-            # Read the exact resolved model snapshot from OpenAI's HTTP response header
-            confirmed_model = stream.response.headers.get("openai-model", "gpt-6.2-astra")
-            st.caption(f"Model: `{confirmed_model}`")
-            
-        st.session_state.messages.append({"role": "assistant", "content": response})
-
-        # Persist updated conversation to Supabase
-        supabase.table("user_chat_history").upsert({
-            "user_id": st.session_state.user.id,
-            "chat_data": st.session_state.messages
-        }).execute()
+        # Attach uploaded document text to the API context without bloating saved chat history
+        api_messages = list(st.session_state.messages)
+        if doc_text.strip():
+            api_messages.insert(1, {
+                "role": "system",
+                "content": (
+                    f"The user has attached the
