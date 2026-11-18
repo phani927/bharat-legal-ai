@@ -1,3 +1,5 @@
-openai
 streamlit
+openai>=2.0.0
 supabase
+pypdf
+python-docx
