@@ -93,27 +93,21 @@ else:
         st.session_state.user = None
         st.session_state.session = None
         st.session_state.messages = []
+        st.session_state.pop("active_doc_name", None)
+        st.session_state.pop("active_doc_text", None)
         st.rerun()
-
-    # Sidebar Document Uploader (Judgments, FIRs, Depositions)
-    st.sidebar.divider()
-    st.sidebar.subheader("📄 Case Document Upload")
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload Judgment / Pleading",
-        type=["pdf", "docx", "txt"],
-        help="Upload a searchable PDF, Word (.docx), or text file to analyze in chat."
-    )
-
-    doc_text = ""
-    if uploaded_file is not None:
-        doc_text = extract_document_text(uploaded_file)
-        if doc_text.strip():
-            st.sidebar.success(f"Loaded `{uploaded_file.name}` (~{len(doc_text)//4:,} tokens)")
-        else:
-            st.sidebar.error("No selectable text found. If this is a scanned PDF, run OCR first.")
 
     st.title("⚖️ Indian Legal AI Assistant")
     st.write("A prototype AI engine tuned for Indian Jurisprudence by Phani.")
+
+    # Show active uploaded document banner if one is loaded in memory
+    if st.session_state.get("active_doc_name"):
+        col1, col2 = st.columns([4, 1])
+        col1.info(f"📄 Active Judgment in Context: **{st.session_state.active_doc_name}**")
+        if col2.button("Clear File"):
+            st.session_state.pop("active_doc_name", None)
+            st.session_state.pop("active_doc_text", None)
+            st.rerun()
 
     # 4. Load Persistent Chat History
     if "messages" not in st.session_state:
@@ -131,36 +125,60 @@ else:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-    # 6. Chat Input & Streaming
-    if prompt := st.chat_input("Ask a question about Indian law or your uploaded judgment..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # 6. Chat Input with Built-In '+' File Attachment
+    submission = st.chat_input(
+        "Ask about Indian law or click + to attach a judgment...",
+        accept_file=True,
+        file_type=["pdf", "docx", "txt"]
+    )
 
-        # Attach uploaded document text to the API context without bloating saved chat history
-        api_messages = list(st.session_state.messages)
-        if doc_text.strip():
-            doc_prompt = f"Attached document ({uploaded_file.name}). Cite [PAGE X] numbers:\n\n{doc_text}"
-            api_messages.insert(1, {"role": "system", "content": doc_prompt})
+    if submission:
+        user_text = submission.text or ""
+        uploaded_files = submission.files or []
 
-        with st.chat_message("assistant"):
-            stream = client.chat.completions.create(
-                model="gpt-6.2-astra",
-                reasoning_effort="high",
-                messages=api_messages,
-                stream=True,
-            )
+        # If a new file was attached via '+', extract and store it in session_state
+        if uploaded_files:
+            f = uploaded_files[0]
+            extracted = extract_document_text(f)
+            if extracted.strip():
+                st.session_state.active_doc_name = f.name
+                st.session_state.active_doc_text = extracted
+                badge = f"📎 **Attached:** `{f.name}` (~{len(extracted)//4:,} tokens)\n\n"
+                user_text = badge + (user_text or "Please review and summarize this judgment.")
+            else:
+                st.error(f"Could not extract text from `{f.name}`. If it is a scanned PDF, please OCR it first.")
+                st.stop()
 
-            response = st.write_stream(stream)
+        if user_text.strip():
+            st.session_state.messages.append({"role": "user", "content": user_text})
+            with st.chat_message("user"):
+                st.markdown(user_text)
 
-            # Read the exact resolved model snapshot from OpenAI's HTTP response header
-            confirmed_model = stream.response.headers.get("openai-model", "gpt-6.2-astra")
-            st.caption(f"Model: `{confirmed_model}`")
+            # Inject active judgment text into API call without bloating Supabase chat history
+            api_messages = list(st.session_state.messages)
+            if st.session_state.get("active_doc_text"):
+                doc_name = st.session_state.active_doc_name
+                doc_body = st.session_state.active_doc_text
+                doc_prompt = f"Attached document ({doc_name}). Cite [PAGE X] numbers:\n\n{doc_body}"
+                api_messages.insert(1, {"role": "system", "content": doc_prompt})
 
-        st.session_state.messages.append({"role": "assistant", "content": response})
+            with st.chat_message("assistant"):
+                stream = client.chat.completions.create(
+                    model="gpt-6.2-astra",
+                    reasoning_effort="high",
+                    messages=api_messages,
+                    stream=True,
+                )
 
-        # Persist updated conversation to Supabase
-        supabase.table("user_chat_history").upsert({
-            "user_id": st.session_state.user.id,
-            "chat_data": st.session_state.messages
-        }).execute()
+                response = st.write_stream(stream)
+
+                confirmed_model = stream.response.headers.get("openai-model", "gpt-6.2-astra")
+                st.caption(f"Model: `{confirmed_model}`")
+
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+            # Persist updated conversation to Supabase
+            supabase.table("user_chat_history").upsert({
+                "user_id": st.session_state.user.id,
+                "chat_data": st.session_state.messages
+            }).execute()
